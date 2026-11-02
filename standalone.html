@@ -1,0 +1,1782 @@
+<!doctype html>
+<html lang="th">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Numerical Method Calculator</title>
+    <style>
+* { box-sizing: border-box; }
+body { margin: 0; font-family: system-ui, 'Segoe UI', Tahoma, sans-serif; color: #222; background: #fff; font-size: 15px; }
+#app { display: flex; min-height: 100vh; }
+nav { width: 240px; flex-shrink: 0; border-right: 1px solid #ddd; padding: 16px; }
+nav h1 { font-size: 18px; margin: 0 0 12px; }
+nav .group { font-size: 12px; color: #888; text-transform: uppercase; margin: 16px 0 4px; }
+nav a { display: block; padding: 6px 8px; color: #222; text-decoration: none; border-radius: 4px; }
+nav a:hover { background: #f2f2f2; }
+nav a.active { background: #222; color: #fff; }
+main { flex: 1; padding: 20px 28px; max-width: 1000px; overflow-x: auto; }
+h2 { margin: 0 0 4px; }
+h3 { margin: 24px 0 8px; font-size: 16px; }
+.muted { color: #777; font-size: 13px; margin: 4px 0; }
+.row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; margin: 12px 0; }
+input, select, button { font: inherit; padding: 5px 8px; border: 1px solid #bbb; border-radius: 4px; background: #fff; }
+input.cell { width: 96px; }
+input.small { width: 100px; }
+button { cursor: pointer; }
+button:hover { background: #f2f2f2; }
+button.primary { background: #222; color: #fff; border-color: #222; }
+button.primary:hover { background: #444; }
+table { border-collapse: collapse; }
+.grid th { font-weight: normal; color: #777; font-size: 13px; padding: 2px 4px; }
+.grid td { padding: 2px; }
+.grid .sep { border-left: 2px solid #bbb; padding-left: 8px; }
+.grid .idx { color: #999; text-align: right; padding-right: 6px; }
+.answer { background: #f7f7f7; border: 1px solid #ddd; padding: 10px 12px; font-size: 16px; }
+pre { white-space: pre-wrap; font-family: Consolas, monospace; font-size: 13px; margin: 6px 0; }
+.error { border: 1px solid #d33; color: #b00; background: #fff5f5; padding: 10px 12px; margin-top: 12px; }
+.step { border-left: 3px solid #ddd; padding: 4px 12px; margin: 10px 0; }
+.step-title { font-weight: 600; }
+.matrix { margin: 6px 0; border-left: 2px solid #444; border-right: 2px solid #444; }
+.matrix td { padding: 2px 10px; text-align: right; font-family: Consolas, monospace; font-size: 13px; }
+.mats { display: flex; gap: 24px; flex-wrap: wrap; }
+.graph { width: 100%; height: 380px; border: 1px solid #eee; }
+.history { margin-top: 32px; border-top: 1px solid #ddd; }
+.list { width: 100%; font-size: 13px; margin-bottom: 8px; }
+.list th, .list td { border-bottom: 1px solid #eee; padding: 4px 6px; text-align: left; }
+.mono { font-family: Consolas, monospace; }
+@media (max-width: 700px) {
+    #app { flex-direction: column; }
+    nav { width: 100%; border-right: none; border-bottom: 1px solid #ddd; }
+    main { padding: 16px; }
+}
+</style>
+    <script src="https://cdn.plot.ly/plotly-2.35.2.min.js" charset="utf-8"></script>
+</head>
+<body>
+    <div id="app"></div>
+    <script>
+(() => {
+// ---- core\enums.js ----
+// src/core/enums.ts
+// ประเภทของปัญหา (Problem) ที่ระบบรองรับ
+var ProblemType;
+(function (ProblemType) {
+    ProblemType["LINEAR_ALGEBRA_EQUATION"] = "LINEAR_ALGEBRA_EQUATION";
+    ProblemType["MATRIX_INVERSION"] = "MATRIX_INVERSION";
+    ProblemType["REGRESSION"] = "REGRESSION";
+    ProblemType["MULTIPLE_REGRESSION"] = "MULTIPLE_REGRESSION";
+    ProblemType["INTERPOLATION"] = "INTERPOLATION";
+})(ProblemType || (ProblemType = {}));
+// ประเภทของวิธีแก้ปัญหา (Solution) ที่ระบบรองรับ
+var SolutionType;
+(function (SolutionType) {
+    SolutionType["GAUSS_ELIMINATION"] = "GAUSS_ELIMINATION";
+    SolutionType["GAUSS_JORDAN"] = "GAUSS_JORDAN";
+    SolutionType["LU_DECOMPOSITION"] = "LU_DECOMPOSITION";
+    SolutionType["CHOLESKY_DECOMPOSITION"] = "CHOLESKY_DECOMPOSITION";
+    SolutionType["MATRIX_INVERSION"] = "MATRIX_INVERSION";
+    SolutionType["LINEAR_REGRESSION"] = "LINEAR_REGRESSION";
+    SolutionType["POLYNOMIAL_REGRESSION"] = "POLYNOMIAL_REGRESSION";
+    SolutionType["MULTIPLE_LINEAR_REGRESSION"] = "MULTIPLE_LINEAR_REGRESSION";
+    SolutionType["NEWTON_DIVIDED_DIFFERENCE"] = "NEWTON_DIVIDED_DIFFERENCE";
+    SolutionType["LAGRANGE_INTERPOLATION"] = "LAGRANGE_INTERPOLATION";
+})(SolutionType || (SolutionType = {}));
+// รูปแบบการประมาณค่าในช่วง: Linear (2 จุด), Quadratic (3 จุด), Polynomial (n จุด)
+var InterpolationMode;
+(function (InterpolationMode) {
+    InterpolationMode["LINEAR"] = "LINEAR";
+    InterpolationMode["QUADRATIC"] = "QUADRATIC";
+    InterpolationMode["POLYNOMIAL"] = "POLYNOMIAL";
+})(InterpolationMode || (InterpolationMode = {}));
+
+// ---- core\SolverFactory.js ----
+/**
+ * Factory Pattern + Registry
+ * ผู้เรียกไม่จำเป็นต้องรู้ว่าจะ new คลาสไหน แค่ส่ง SolutionType และ input มา
+ * ผลลัพธ์ที่ได้เป็น ProblemSolver (คลาสแม่) → เรียก solve() ได้เหมือนกันทุกวิธี (Polymorphism)
+ */
+class SolverFactory {
+    static register(descriptor) {
+        SolverFactory.registry.set(descriptor.type, descriptor);
+    }
+    static get(type) {
+        const d = SolverFactory.registry.get(type);
+        if (!d)
+            throw new Error(`ไม่พบวิธี ${type}`);
+        return d;
+    }
+    static list() {
+        return [...SolverFactory.registry.values()];
+    }
+    /** สร้าง Problem และ ProblemSolver ที่ถูกต้องจาก SolutionType */
+    static create(type, input) {
+        const d = SolverFactory.get(type);
+        const problem = new d.problemClass(input);
+        return new d.solverClass(problem);
+    }
+}
+// static + private: มีที่เก็บเดียวทั้งโปรแกรม และแก้ไขได้ผ่าน register() เท่านั้น
+SolverFactory.registry = new Map();
+
+// ---- core\errors.js ----
+// src/core/errors.ts
+// Inheritance จากคลาส Error ของ JavaScript เพื่อแยกประเภทข้อผิดพลาด
+class NumericalError extends Error {
+    constructor(message) {
+        super(message);
+        this.name = 'NumericalError';
+    }
+}
+/** ข้อมูลที่ผู้ใช้กรอกไม่ถูกต้อง */
+class ValidationError extends NumericalError {
+    constructor(message) {
+        super(message);
+        this.name = 'ValidationError';
+    }
+}
+/** เมทริกซ์ไม่สามารถหาคำตอบได้ (เช่น det = 0) */
+class SingularMatrixError extends NumericalError {
+    constructor(message = 'เมทริกซ์เป็น Singular (det = 0) ไม่สามารถหาคำตอบได้') {
+        super(message);
+        this.name = 'SingularMatrixError';
+    }
+}
+
+// ---- core\Problem.js ----
+/**
+ * <<abstract>> Problem
+ * เก็บข้อมูลของ "ปัญหา" ที่ผู้ใช้ป้อนเข้ามา
+ * - input เก็บเป็น JSON string (เหมือนต้นแบบ) เพื่อนำไปบันทึกประวัติได้ง่าย
+ * - คลาสลูกต้อง implement validate() และ describe() ตามรูปแบบปัญหาของตัวเอง
+ */
+class Problem {
+    constructor(input, problemType) {
+        this.input = input;
+        this.problemType = problemType;
+        this.problemId = `P${Date.now().toString(36)}${(Problem.counter++).toString(36)}`;
+    }
+    // ---------- Getter methods (Encapsulation) ----------
+    getProblemId() {
+        return this.problemId;
+    }
+    getInput() {
+        return this.input;
+    }
+    getProblemType() {
+        return this.problemType;
+    }
+}
+Problem.counter = 0;
+
+// ---- problems\PointsProblem.js ----
+
+
+/**
+ * <<abstract>> PointsProblem
+ * ปัญหาที่ข้อมูลเป็นชุดจุด (x, y) — ใช้ร่วมกันระหว่าง Regression และ Interpolation
+ */
+class PointsProblem extends Problem {
+    constructor(input, problemType) {
+        super(input, problemType);
+        const data = JSON.parse(input);
+        this.points = (data.points ?? []).map((p) => ({ x: Number(p.x), y: Number(p.y) }));
+    }
+    getPoints() {
+        return this.points.map((p) => ({ ...p }));
+    }
+    /** ตรวจสอบพื้นฐานที่ทุกปัญหาแบบจุดต้องผ่าน — คลาสลูกเรียก super.validate() ได้ */
+    validate() {
+        if (this.points.length < 2)
+            throw new ValidationError('ต้องมีข้อมูลอย่างน้อย 2 จุด');
+        if (this.points.some((p) => !Number.isFinite(p.x) || !Number.isFinite(p.y)))
+            throw new ValidationError('ค่า x และ y ทุกจุดต้องเป็นตัวเลข');
+    }
+}
+
+// ---- problems\InterpolationProblem.js ----
+// src/problems/InterpolationProblem.ts
+
+
+
+/** ปัญหาการประมาณค่าในช่วง (Linear / Quadratic / Polynomial) */
+class InterpolationProblem extends PointsProblem {
+    constructor(input) {
+        super(input, ProblemType.INTERPOLATION);
+        const data = JSON.parse(input);
+        this.xTarget = Number(data.xTarget);
+        this.mode = data.mode ?? InterpolationMode.POLYNOMIAL;
+        this.selected = data.selected?.length ? [...data.selected] : this.points.map((_, i) => i);
+    }
+    getXTarget() {
+        return this.xTarget;
+    }
+    getMode() {
+        return this.mode;
+    }
+    /** คืนเฉพาะจุดที่ถูกเลือก เรียงตาม x */
+    getSelectedPoints() {
+        return this.selected.map((i) => ({ ...this.points[i] })).sort((a, b) => a.x - b.x);
+    }
+    validate() {
+        super.validate();
+        const need = InterpolationProblem.REQUIRED_POINTS[this.mode];
+        if (need !== null && this.selected.length !== need)
+            throw new ValidationError(`${this.mode} Interpolation ต้องเลือกจุด ${need} จุดพอดี (เลือกไว้ ${this.selected.length} จุด)`);
+        if (this.selected.length < 2)
+            throw new ValidationError('ต้องเลือกจุดอย่างน้อย 2 จุด');
+        const xs = this.getSelectedPoints().map((p) => p.x);
+        if (new Set(xs).size !== xs.length)
+            throw new ValidationError('ค่า x ของจุดที่เลือกต้องไม่ซ้ำกัน');
+        if (!Number.isFinite(this.xTarget))
+            throw new ValidationError('กรุณาระบุค่า x ที่ต้องการหาค่า');
+    }
+    describe() {
+        return `${this.mode}, ใช้ ${this.selected.length} จุด, x = ${this.xTarget}`;
+    }
+}
+/** จำนวนจุดที่ต้องใช้ของแต่ละ mode (Polynomial = ไม่จำกัด) */
+InterpolationProblem.REQUIRED_POINTS = {
+    [InterpolationMode.LINEAR]: 2,
+    [InterpolationMode.QUADRATIC]: 3,
+    [InterpolationMode.POLYNOMIAL]: null,
+};
+
+// ---- core\Matrix.js ----
+// src/core/Matrix.ts
+
+/**
+ * คลาส Matrix — ตัวอย่าง Encapsulation
+ * ข้อมูลภายใน (data) เป็น private ภายนอกเข้าถึงได้ผ่าน getter / method เท่านั้น
+ */
+class Matrix {
+    constructor(data) {
+        if (data.length === 0)
+            throw new ValidationError('เมทริกซ์ต้องมีอย่างน้อย 1 แถว');
+        const cols = data[0].length;
+        if (data.some((r) => r.length !== cols))
+            throw new ValidationError('ทุกแถวต้องมีจำนวนคอลัมน์เท่ากัน');
+        // copy เพื่อไม่ให้ภายนอกแก้ไขข้อมูลภายในได้ (defensive copy)
+        this.data = data.map((r) => [...r]);
+    }
+    // ---------- Static factory methods ----------
+    static zeros(rows, cols) {
+        return new Matrix(Array.from({ length: rows }, () => new Array(cols).fill(0)));
+    }
+    static identity(n) {
+        const m = Matrix.zeros(n, n);
+        for (let i = 0; i < n; i++)
+            m.set(i, i, 1);
+        return m;
+    }
+    static columnVector(values) {
+        return new Matrix(values.map((v) => [v]));
+    }
+    // ---------- Getters ----------
+    get rows() {
+        return this.data.length;
+    }
+    get cols() {
+        return this.data[0].length;
+    }
+    get isSquare() {
+        return this.rows === this.cols;
+    }
+    get(r, c) {
+        return this.data[r][c];
+    }
+    set(r, c, value) {
+        this.data[r][c] = value;
+    }
+    row(r) {
+        return [...this.data[r]];
+    }
+    column(c) {
+        return this.data.map((r) => r[c]);
+    }
+    toArray() {
+        return this.data.map((r) => [...r]);
+    }
+    clone() {
+        return new Matrix(this.data);
+    }
+    // ---------- Row operations (ใช้ใน Gauss / Gauss-Jordan) ----------
+    swapRows(a, b) {
+        [this.data[a], this.data[b]] = [this.data[b], this.data[a]];
+    }
+    scaleRow(r, factor) {
+        this.data[r] = this.data[r].map((v) => v * factor);
+    }
+    /** row[target] = row[target] + factor * row[source] */
+    addRowMultiple(target, source, factor) {
+        this.data[target] = this.data[target].map((v, j) => v + factor * this.data[source][j]);
+    }
+    // ---------- Matrix operations ----------
+    transpose() {
+        return new Matrix(this.data[0].map((_, c) => this.column(c)));
+    }
+    multiply(other) {
+        if (this.cols !== other.rows)
+            throw new ValidationError('ขนาดเมทริกซ์ไม่สามารถคูณกันได้');
+        const out = Matrix.zeros(this.rows, other.cols);
+        for (let i = 0; i < this.rows; i++)
+            for (let j = 0; j < other.cols; j++) {
+                let s = 0;
+                for (let k = 0; k < this.cols; k++)
+                    s += this.data[i][k] * other.get(k, j);
+                out.set(i, j, s);
+            }
+        return out;
+    }
+    /** ต่อเมทริกซ์ทางขวา เช่น [A | b] หรือ [A | I] */
+    augment(other) {
+        if (this.rows !== other.rows)
+            throw new ValidationError('จำนวนแถวไม่เท่ากัน');
+        return new Matrix(this.data.map((r, i) => [...r, ...other.row(i)]));
+    }
+    /** ตัดเมทริกซ์ย่อยตามคอลัมน์ */
+    sliceColumns(start, end) {
+        return new Matrix(this.data.map((r) => r.slice(start, end)));
+    }
+    isSymmetric(eps = 1e-9) {
+        if (!this.isSquare)
+            return false;
+        for (let i = 0; i < this.rows; i++)
+            for (let j = 0; j < i; j++)
+                if (Math.abs(this.data[i][j] - this.data[j][i]) > eps)
+                    return false;
+        return true;
+    }
+    toString() {
+        return this.data.map((r) => r.map((v) => Matrix.format(v)).join('\t')).join('\n');
+    }
+    /** จัดรูปแบบตัวเลขให้อ่านง่าย */
+    static format(v, digits = 6) {
+        if (Number.isNaN(v))
+            return '';
+        if (!Number.isFinite(v))
+            return String(v);
+        const a = Math.abs(v);
+        if (a < 1e-14)
+            return '0';
+        // ค่าที่เล็ก/ใหญ่มากใช้รูปแบบวิทยาศาสตร์ เพื่อไม่ให้ปัดเป็น 0
+        if (a < 1e-3 || a >= 1e9)
+            return v.toExponential(digits).replace(/\.?0+e/, 'e');
+        return String(Number(v.toFixed(digits)));
+    }
+}
+
+// ---- problems\MatrixProblem.js ----
+// src/problems/MatrixProblem.ts
+
+
+
+
+/**
+ * ปัญหาที่มีเมทริกซ์จัตุรัส A เป็นข้อมูลหลัก (ใช้กับ Matrix Inversion)
+ * Inheritance: MatrixProblem → Problem
+ */
+class MatrixProblem extends Problem {
+    constructor(input, problemType = ProblemType.MATRIX_INVERSION) {
+        super(input, problemType);
+        const data = JSON.parse(input);
+        this.matrixA = new Matrix(data.matrixA ?? [[]]);
+    }
+    getMatrixA() {
+        return this.matrixA.clone();
+    }
+    validate() {
+        if (!this.matrixA.isSquare)
+            throw new ValidationError('เมทริกซ์ A ต้องเป็นเมทริกซ์จัตุรัส');
+        if (this.matrixA.rows > 10)
+            throw new ValidationError('รองรับขนาดเมทริกซ์ไม่เกิน 10×10');
+        if (this.matrixA.toArray().flat().some((v) => !Number.isFinite(v)))
+            throw new ValidationError('ข้อมูลในเมทริกซ์ A ต้องเป็นตัวเลขทั้งหมด');
+    }
+    describe() {
+        return `A ขนาด ${this.matrixA.rows}×${this.matrixA.cols}`;
+    }
+}
+
+// ---- problems\LinearSystemProblem.js ----
+// src/problems/LinearSystemProblem.ts
+
+
+
+
+/**
+ * ปัญหาระบบสมการเชิงเส้น Ax = b
+ * Inheritance หลายชั้น: LinearSystemProblem → MatrixProblem → Problem
+ * (นำ matrixA และการตรวจสอบเมทริกซ์จัตุรัสจากคลาสแม่มาใช้ซ้ำ แล้วเพิ่มเวกเตอร์ b)
+ */
+class LinearSystemProblem extends MatrixProblem {
+    constructor(input) {
+        super(input, ProblemType.LINEAR_ALGEBRA_EQUATION);
+        const data = JSON.parse(input);
+        this.arrayB = [...(data.arrayB ?? [])];
+    }
+    getArrayB() {
+        return [...this.arrayB];
+    }
+    getVectorB() {
+        return Matrix.columnVector(this.arrayB);
+    }
+    /** Override: ตรวจสอบของคลาสแม่ก่อน (super) แล้วตรวจ b เพิ่ม */
+    validate() {
+        super.validate();
+        if (this.arrayB.length !== this.matrixA.rows)
+            throw new ValidationError('ขนาดของเวกเตอร์ b ต้องเท่ากับจำนวนแถวของ A');
+        if (this.arrayB.some((v) => !Number.isFinite(v)))
+            throw new ValidationError('ข้อมูลใน b ต้องเป็นตัวเลขทั้งหมด');
+    }
+    describe() {
+        return `Ax = b, ${this.matrixA.rows} ตัวแปร`;
+    }
+}
+
+// ---- problems\MultipleRegressionProblem.js ----
+// src/problems/MultipleRegressionProblem.ts
+
+
+
+/** ปัญหา Multiple Linear Regression: y = a0 + a1x1 + ... + akxk */
+class MultipleRegressionProblem extends Problem {
+    constructor(input) {
+        super(input, ProblemType.MULTIPLE_REGRESSION);
+        const data = JSON.parse(input);
+        this.xs = (data.xs ?? []).map((r) => r.map(Number));
+        this.y = (data.y ?? []).map(Number);
+        this.xTarget = (data.xTarget ?? []).map(Number);
+    }
+    getXs() {
+        return this.xs.map((r) => [...r]);
+    }
+    getY() {
+        return [...this.y];
+    }
+    getXTarget() {
+        return [...this.xTarget];
+    }
+    getVariableCount() {
+        return this.xs[0]?.length ?? 0;
+    }
+    validate() {
+        const k = this.getVariableCount();
+        if (k < 1)
+            throw new ValidationError('ต้องมีตัวแปรต้นอย่างน้อย 1 ตัว');
+        if (this.xs.length !== this.y.length)
+            throw new ValidationError('จำนวนข้อมูล x และ y ต้องเท่ากัน');
+        if (this.xs.length < k + 1)
+            throw new ValidationError(`ตัวแปร ${k} ตัว ต้องมีข้อมูลอย่างน้อย ${k + 1} ชุด`);
+        if ([...this.xs.flat(), ...this.y].some((v) => !Number.isFinite(v)))
+            throw new ValidationError('ข้อมูลทั้งหมดต้องเป็นตัวเลข');
+        if (this.xTarget.length !== k || this.xTarget.some((v) => !Number.isFinite(v)))
+            throw new ValidationError(`กรุณาระบุค่าที่ต้องการทำนายให้ครบ ${k} ตัวแปร`);
+    }
+    describe() {
+        return `${this.xs.length} ชุดข้อมูล, ${this.getVariableCount()} ตัวแปร`;
+    }
+}
+
+// ---- problems\RegressionProblem.js ----
+// src/problems/RegressionProblem.ts
+
+
+
+/** ปัญหา Least-squares Regression แบบตัวแปรเดียว (Linear / Polynomial) */
+class RegressionProblem extends PointsProblem {
+    constructor(input) {
+        super(input, ProblemType.REGRESSION);
+        const data = JSON.parse(input);
+        this.order = Math.trunc(Number(data.order ?? 1));
+        this.xTarget = Number(data.xTarget);
+    }
+    getOrder() {
+        return this.order;
+    }
+    getXTarget() {
+        return this.xTarget;
+    }
+    validate() {
+        super.validate();
+        if (this.order < 1)
+            throw new ValidationError('ดีกรี (m) ต้องมีค่าอย่างน้อย 1');
+        if (this.points.length < this.order + 1)
+            throw new ValidationError(`ดีกรี ${this.order} ต้องใช้ข้อมูลอย่างน้อย ${this.order + 1} จุด`);
+        if (!Number.isFinite(this.xTarget))
+            throw new ValidationError('กรุณาระบุค่า x ที่ต้องการทำนาย');
+    }
+    describe() {
+        return `${this.points.length} จุด, m = ${this.order}, x = ${this.xTarget}`;
+    }
+}
+
+// ---- core\ProblemSolver.js ----
+/**
+ * <<abstract>> ProblemSolver<P>
+ * - Composition: มี attribute problem (วัตถุของคลาส Problem) อยู่ภายใน
+ * - Generic <P extends Problem> ทำให้คลาสลูกระบุชนิดของปัญหาที่ตัวเองแก้ได้
+ * - Template Method: solve() กำหนดลำดับขั้น (validate → compute → สรุปผล)
+ *   ส่วนการคำนวณจริงอยู่ใน compute() ซึ่งเป็น abstract ให้คลาสลูก implement
+ */
+class ProblemSolver {
+    constructor(problem, solutionType) {
+        this.steps = [];
+        this.problem = problem;
+        this.solutionType = solutionType;
+    }
+    /** Template method — คลาสลูกไม่ต้อง override */
+    solve() {
+        this.problem.validate();
+        this.steps = [];
+        const t0 = performance.now();
+        const { values, answer } = this.compute();
+        const elapsedMs = performance.now() - t0;
+        this.output = { values, answer, steps: this.steps, elapsedMs };
+        return this.output;
+    }
+    // ---------- Helper ที่คลาสลูกใช้ร่วมกัน ----------
+    addStep(title, text, matrix) {
+        this.steps.push({ title, text, matrix: matrix?.clone() });
+    }
+    addMatricesStep(title, matrices, text) {
+        this.steps.push({ title, text, matrices: matrices.map((m) => ({ label: m.label, matrix: m.matrix.clone() })) });
+    }
+    getProblem() {
+        return this.problem;
+    }
+    getSolutionType() {
+        return this.solutionType;
+    }
+    getOutput() {
+        return this.output;
+    }
+}
+
+// ---- solvers\interpolation\InterpolationSolver.js ----
+// src/solvers/interpolation/InterpolationSolver.ts
+
+
+
+const MODE_NAME = {
+    [InterpolationMode.LINEAR]: 'Linear',
+    [InterpolationMode.QUADRATIC]: 'Quadratic',
+    [InterpolationMode.POLYNOMIAL]: 'Polynomial',
+};
+/**
+ * <<abstract>> InterpolationSolver
+ * ขั้นตอนเหมือนกันทุกวิธี: เลือกจุด → เตรียมสัมประสิทธิ์ (prepare) → หา f(x)
+ * Newton และ Lagrange ต่างกันแค่ prepare() และ predict() → abstract ให้คลาสลูกเขียนเอง
+ * (Linear / Quadratic / Polynomial = จำนวนจุดที่เลือก 2 / 3 / n)
+ */
+class InterpolationSolver extends ProblemSolver {
+    constructor(problem, solutionType) {
+        super(problem, solutionType);
+        this.nodes = [];
+    }
+    getMethodName() {
+        return `${MODE_NAME[this.problem.getMode()]} Interpolation — ${this.getBaseName()}`;
+    }
+    compute() {
+        this.nodes = this.problem.getSelectedPoints();
+        this.addStep('จุดที่ใช้', this.nodes.map((p, i) => `x${i} = ${Matrix.format(p.x)},  f(x${i}) = ${Matrix.format(p.y)}`).join('\n'));
+        this.prepare(this.nodes);
+        const xT = this.problem.getXTarget();
+        const y = this.predict(xT);
+        this.addStep('คำตอบ', `f(${xT}) ≈ ${Matrix.format(y)}`);
+        return { values: [y], answer: `f(${xT}) ≈ ${Matrix.format(y)}` };
+    }
+    getPlotData() {
+        const all = this.problem.getPoints();
+        const xT = this.problem.getXTarget();
+        const xs = this.nodes.map((p) => p.x);
+        const lo = Math.min(...xs, xT);
+        const hi = Math.max(...xs, xT);
+        const curveX = Array.from({ length: 200 }, (_, i) => lo + ((hi - lo) * i) / 199);
+        return [
+            { name: 'ข้อมูลทั้งหมด', x: all.map((p) => p.x), y: all.map((p) => p.y), mode: 'markers' },
+            { name: 'จุดที่ใช้', x: xs, y: this.nodes.map((p) => p.y), mode: 'markers' },
+            { name: 'Polynomial', x: curveX, y: curveX.map((x) => this.predict(x)), mode: 'lines' },
+            { name: `f(${xT})`, x: [xT], y: [this.predict(xT)], mode: 'markers' },
+        ];
+    }
+}
+
+// ---- solvers\interpolation\LagrangeInterpolationSolver.js ----
+// src/solvers/interpolation/LagrangeInterpolationSolver.ts
+
+
+
+/**
+ * Lagrange Interpolation
+ * f(x) = Σ Li(x)·f(xi)   โดย  Li(x) = Π (x − xj)/(xi − xj),  j ≠ i
+ */
+class LagrangeInterpolationSolver extends InterpolationSolver {
+    constructor(problem) {
+        super(problem, SolutionType.LAGRANGE_INTERPOLATION);
+    }
+    getBaseName() {
+        return 'Lagrange';
+    }
+    /** Li(x) ของจุดที่ i */
+    basis(i, x) {
+        let L = 1;
+        for (let j = 0; j < this.nodes.length; j++)
+            if (j !== i)
+                L *= (x - this.nodes[j].x) / (this.nodes[i].x - this.nodes[j].x);
+        return L;
+    }
+    prepare(nodes) {
+        const xT = this.problem.getXTarget();
+        const lines = nodes.map((p, i) => {
+            const num = nodes.filter((_, j) => j !== i).map((q) => `(${Matrix.format(q.x)} − x)`).join('');
+            const den = nodes.filter((_, j) => j !== i).map((q) => `(${Matrix.format(q.x)} − ${Matrix.format(p.x)})`).join('');
+            return `L${i} = ${num} / ${den}  →  L${i}(${xT}) = ${Matrix.format(this.basis(i, xT))}`;
+        });
+        this.addStep('คำนวณ Li(x)', lines.join('\n'));
+        const sum = nodes.map((p, i) => `(${Matrix.format(this.basis(i, xT))})(${Matrix.format(p.y)})`).join(' + ');
+        this.addStep('f(x) = Σ Li(x)·f(xi)', `f(${xT}) = ${sum}`);
+    }
+    predict(x) {
+        return this.nodes.reduce((s, p, i) => s + this.basis(i, x) * p.y, 0);
+    }
+}
+
+// ---- solvers\interpolation\NewtonDividedDifferenceSolver.js ----
+// src/solvers/interpolation/NewtonDividedDifferenceSolver.ts
+
+
+
+/**
+ * Newton's Divided-Difference
+ * f(x) = C0 + C1(x−x0) + C2(x−x0)(x−x1) + ... + Cn(x−x0)...(x−xn−1)
+ */
+class NewtonDividedDifferenceSolver extends InterpolationSolver {
+    constructor(problem) {
+        super(problem, SolutionType.NEWTON_DIVIDED_DIFFERENCE);
+        this.c = [];
+    }
+    getBaseName() {
+        return "Newton's Divided-Difference";
+    }
+    prepare(nodes) {
+        const n = nodes.length;
+        // table[i][j] = f[x_i, ..., x_{i+j}]
+        const table = nodes.map((p) => [p.y]);
+        for (let j = 1; j < n; j++)
+            for (let i = 0; i < n - j; i++)
+                table[i][j] = (table[i + 1][j - 1] - table[i][j - 1]) / (nodes[i + j].x - nodes[i].x);
+        const display = new Matrix(Array.from({ length: n }, () => new Array(n + 1).fill(NaN)));
+        for (let i = 0; i < n; i++) {
+            display.set(i, 0, nodes[i].x);
+            for (let j = 0; j < n - i; j++)
+                display.set(i, j + 1, table[i][j]);
+        }
+        this.addStep('ตาราง Divided-Difference', 'คอลัมน์: x | f[x] | f[ , ] | f[ , , ] | ...', display);
+        this.c = table[0].slice(0, n);
+        const terms = this.c.map((ci, i) => {
+            const factors = nodes.slice(0, i).map((p) => `(x − ${Matrix.format(p.x)})`).join('');
+            return `${Matrix.format(ci)}${factors}`;
+        });
+        this.addStep('สัมประสิทธิ์ C', this.c.map((v, i) => `C${i} = ${Matrix.format(v)}`).join('\n') + `\n\nf(x) = ${terms.join(' + ').replace(/\+ -/g, '− ')}`);
+    }
+    predict(x) {
+        let result = 0;
+        let term = 1;
+        for (let i = 0; i < this.c.length; i++) {
+            result += this.c[i] * term;
+            term *= x - this.nodes[i].x;
+        }
+        return result;
+    }
+}
+
+// ---- solvers\linear\LinearSystemSolver.js ----
+
+
+
+/**
+ * <<abstract>> LinearSystemSolver
+ * คลาสแม่ของทุกวิธีที่แก้ Ax = b
+ * รวม method ที่ใช้ร่วมกัน (Forward / Back substitution) ไว้ที่เดียว → ลดโค้ดซ้ำ
+ */
+class LinearSystemSolver extends ProblemSolver {
+    constructor(problem, solutionType) {
+        super(problem, solutionType);
+    }
+    /** แก้ Ux = y เมื่อ U เป็นเมทริกซ์สามเหลี่ยมบน */
+    backSubstitution(U, y) {
+        const n = y.length;
+        const x = new Array(n).fill(0);
+        for (let i = n - 1; i >= 0; i--) {
+            let sum = y[i];
+            for (let j = i + 1; j < n; j++)
+                sum -= U.get(i, j) * x[j];
+            if (Math.abs(U.get(i, i)) < LinearSystemSolver.EPS)
+                throw new SingularMatrixError();
+            x[i] = sum / U.get(i, i);
+        }
+        return x;
+    }
+    /** แก้ Ly = b เมื่อ L เป็นเมทริกซ์สามเหลี่ยมล่าง */
+    forwardSubstitution(L, b) {
+        const n = b.length;
+        const y = new Array(n).fill(0);
+        for (let i = 0; i < n; i++) {
+            let sum = b[i];
+            for (let j = 0; j < i; j++)
+                sum -= L.get(i, j) * y[j];
+            if (Math.abs(L.get(i, i)) < LinearSystemSolver.EPS)
+                throw new SingularMatrixError();
+            y[i] = sum / L.get(i, i);
+        }
+        return y;
+    }
+    /** หา pivot ที่มีค่าสัมบูรณ์มากที่สุดในคอลัมน์ col (Partial Pivoting) */
+    partialPivot(m, col, fromRow) {
+        let best = fromRow;
+        for (let r = fromRow + 1; r < m.rows; r++)
+            if (Math.abs(m.get(r, col)) > Math.abs(m.get(best, col)))
+                best = r;
+        if (Math.abs(m.get(best, col)) < LinearSystemSolver.EPS)
+            throw new SingularMatrixError();
+        if (best !== fromRow) {
+            m.swapRows(best, fromRow);
+            this.addStep(`สลับแถว R${fromRow + 1} ↔ R${best + 1} (Partial Pivoting)`, undefined, m);
+        }
+    }
+    formatSolution(x, name = 'x') {
+        return x.map((v, i) => `${name}${i + 1} = ${Matrix.format(v)}`).join(',  ');
+    }
+}
+LinearSystemSolver.EPS = 1e-12;
+
+// ---- solvers\linear\DecompositionSolver.js ----
+
+/**
+ * <<abstract>> DecompositionSolver
+ * แนวคิดเดียวกันของ LU และ Cholesky: แยก A = L·U แล้วแก้ 2 ขั้น
+ *   (1) Ly = b  (Forward substitution)
+ *   (2) Ux = y  (Back substitution)
+ * ต่างกันแค่ "วิธีแยกเมทริกซ์" → จึงให้ decompose() เป็น abstract (Polymorphism)
+ */
+class DecompositionSolver extends LinearSystemSolver {
+    compute() {
+        const A = this.problem.getMatrixA();
+        const b = this.problem.getArrayB();
+        this.addStep('เมทริกซ์ A', undefined, A);
+        const { L, U } = this.decompose(A);
+        this.addMatricesStep('แยกเมทริกซ์ A = L · U', [
+            { label: 'L', matrix: L },
+            { label: 'U', matrix: U },
+        ]);
+        const y = this.forwardSubstitution(L, b);
+        this.addStep('แก้ Ly = b ด้วย Forward Substitution', this.formatSolution(y, 'y'));
+        const x = this.backSubstitution(U, y);
+        this.addStep('แก้ Ux = y ด้วย Back Substitution', this.formatSolution(x));
+        return { values: x, answer: this.formatSolution(x) };
+    }
+}
+
+// ---- solvers\linear\CholeskySolver.js ----
+// src/solvers/linear/CholeskySolver.ts
+
+
+
+
+/**
+ * Cholesky Decomposition: A = L · Lᵀ  (A ต้องสมมาตรและเป็น Positive definite)
+ * Override decompose() ของคลาสแม่ — โค้ดส่วน Forward/Back substitution ใช้ของคลาสแม่ได้ทันที
+ */
+class CholeskySolver extends DecompositionSolver {
+    constructor(problem) {
+        super(problem, SolutionType.CHOLESKY_DECOMPOSITION);
+    }
+    getMethodName() {
+        return 'Cholesky Decomposition';
+    }
+    decompose(A) {
+        if (!A.isSymmetric())
+            throw new ValidationError('Cholesky ใช้ได้กับเมทริกซ์สมมาตร (A = Aᵀ) เท่านั้น');
+        const n = A.rows;
+        const L = Matrix.zeros(n, n);
+        for (let i = 0; i < n; i++) {
+            for (let j = 0; j <= i; j++) {
+                let sum = 0;
+                for (let k = 0; k < j; k++)
+                    sum += L.get(i, k) * L.get(j, k);
+                if (i === j) {
+                    const d = A.get(i, i) - sum;
+                    if (d <= 0)
+                        throw new ValidationError('เมทริกซ์ไม่เป็น Positive definite จึงใช้ Cholesky ไม่ได้');
+                    L.set(i, i, Math.sqrt(d));
+                }
+                else {
+                    L.set(i, j, (A.get(i, j) - sum) / L.get(j, j));
+                }
+            }
+        }
+        this.addStep('สูตร', 'l_ii = √(a_ii − Σ l_ik²),   l_ij = (a_ij − Σ l_ik·l_jk) / l_jj');
+        return { L, U: L.transpose() };
+    }
+}
+
+// ---- solvers\linear\GaussEliminationSolver.js ----
+// src/solvers/linear/GaussEliminationSolver.ts
+
+
+
+/** Gauss Elimination: Forward elimination → เมทริกซ์สามเหลี่ยมบน → Back substitution */
+class GaussEliminationSolver extends LinearSystemSolver {
+    constructor(problem) {
+        super(problem, SolutionType.GAUSS_ELIMINATION);
+    }
+    getMethodName() {
+        return 'Gauss Elimination';
+    }
+    compute() {
+        const A = this.problem.getMatrixA();
+        const n = A.rows;
+        const aug = A.augment(this.problem.getVectorB());
+        this.addStep('สร้าง Augmented Matrix [A | b]', undefined, aug);
+        // ----- Forward elimination -----
+        for (let k = 0; k < n - 1; k++) {
+            this.partialPivot(aug, k, k);
+            for (let i = k + 1; i < n; i++) {
+                const factor = aug.get(i, k) / aug.get(k, k);
+                if (factor === 0)
+                    continue;
+                aug.addRowMultiple(i, k, -factor);
+            }
+            this.addStep(`กำจัดตัวแปร x${k + 1} ออกจากแถวที่ ${k + 2}–${n}`, `Ri = Ri − (a_i${k + 1} / a_${k + 1}${k + 1}) × R${k + 1}`, aug);
+        }
+        // ----- Back substitution -----
+        const U = aug.sliceColumns(0, n);
+        const y = aug.column(n);
+        const x = this.backSubstitution(U, y);
+        const lines = [];
+        for (let i = n - 1; i >= 0; i--) {
+            const terms = [];
+            for (let j = i + 1; j < n; j++)
+                terms.push(`(${Matrix.format(U.get(i, j))})(${Matrix.format(x[j])})`);
+            lines.push(`x${i + 1} = [ ${Matrix.format(y[i])}${terms.length ? ' − ' + terms.join(' − ') : ''} ] / ${Matrix.format(U.get(i, i))} = ${Matrix.format(x[i])}`);
+        }
+        this.addStep('Back Substitution', lines.join('\n'));
+        return { values: x, answer: this.formatSolution(x) };
+    }
+}
+
+// ---- solvers\linear\GaussJordanSolver.js ----
+// src/solvers/linear/GaussJordanSolver.ts
+
+
+
+
+/**
+ * Gauss-Jordan: ทำ [A | b] ให้อยู่ในรูป Reduced Row Echelon Form [I | x]
+ * อัลกอริทึม rref() เป็น static เพื่อให้คลาสอื่นนำไปใช้ซ้ำได้ (เช่น MatrixInversionSolver)
+ */
+class GaussJordanSolver extends LinearSystemSolver {
+    constructor(problem) {
+        super(problem, SolutionType.GAUSS_JORDAN);
+    }
+    getMethodName() {
+        return 'Gauss-Jordan Elimination';
+    }
+    compute() {
+        const A = this.problem.getMatrixA();
+        const n = A.rows;
+        const aug = A.augment(this.problem.getVectorB());
+        this.addStep('สร้าง Augmented Matrix [A | b]', undefined, aug);
+        GaussJordanSolver.rref(aug, n, (title, m) => this.addStep(title, undefined, m));
+        const x = aug.column(n);
+        this.addStep('ได้ [I | x] คำตอบอยู่ที่คอลัมน์สุดท้าย', this.formatSolution(x));
+        return { values: x, answer: this.formatSolution(x) };
+    }
+    /**
+     * Reduced Row Echelon Form (ทำงานกับ n คอลัมน์แรก)
+     * 1) Partial pivoting  2) หารแถว pivot ให้ตัวนำเป็น 1  3) กำจัดคอลัมน์นั้นในแถวอื่นทั้งหมด
+     */
+    static rref(m, n, onStep) {
+        for (let k = 0; k < n; k++) {
+            let best = k;
+            for (let r = k + 1; r < m.rows; r++)
+                if (Math.abs(m.get(r, k)) > Math.abs(m.get(best, k)))
+                    best = r;
+            if (Math.abs(m.get(best, k)) < 1e-12)
+                throw new SingularMatrixError();
+            if (best !== k) {
+                m.swapRows(best, k);
+                onStep?.(`สลับแถว R${k + 1} ↔ R${best + 1} (Partial Pivoting)`, m);
+            }
+            const pivot = m.get(k, k);
+            m.scaleRow(k, 1 / pivot);
+            for (let i = 0; i < m.rows; i++) {
+                if (i === k)
+                    continue;
+                const f = m.get(i, k);
+                if (f !== 0)
+                    m.addRowMultiple(i, k, -f);
+            }
+            onStep?.(`R${k + 1} = R${k + 1} / ${Matrix.format(pivot)} แล้วกำจัดคอลัมน์ที่ ${k + 1} ในแถวอื่น`, m);
+        }
+        return m;
+    }
+}
+
+// ---- solvers\linear\LUDecompositionSolver.js ----
+// src/solvers/linear/LUDecompositionSolver.ts
+
+
+
+
+/** LU Decomposition (Doolittle: เส้นทแยงของ L เป็น 1) */
+class LUDecompositionSolver extends DecompositionSolver {
+    constructor(problem) {
+        super(problem, SolutionType.LU_DECOMPOSITION);
+    }
+    getMethodName() {
+        return 'LU Decomposition (Doolittle)';
+    }
+    decompose(A) {
+        const n = A.rows;
+        const L = Matrix.identity(n);
+        const U = Matrix.zeros(n, n);
+        for (let i = 0; i < n; i++) {
+            // แถวที่ i ของ U
+            for (let k = i; k < n; k++) {
+                let sum = 0;
+                for (let j = 0; j < i; j++)
+                    sum += L.get(i, j) * U.get(j, k);
+                U.set(i, k, A.get(i, k) - sum);
+            }
+            if (Math.abs(U.get(i, i)) < 1e-12)
+                throw new SingularMatrixError(`u${i + 1}${i + 1} = 0 ทำ LU (ไม่สลับแถว) ไม่ได้ ลองใช้ Gauss Elimination แทน`);
+            // คอลัมน์ที่ i ของ L
+            for (let k = i + 1; k < n; k++) {
+                let sum = 0;
+                for (let j = 0; j < i; j++)
+                    sum += L.get(k, j) * U.get(j, i);
+                L.set(k, i, (A.get(k, i) - sum) / U.get(i, i));
+            }
+        }
+        return { L, U };
+    }
+}
+
+// ---- solvers\MatrixInversionSolver.js ----
+// src/solvers/MatrixInversionSolver.ts
+
+
+
+
+/** หาเมทริกซ์ผกผัน A⁻¹ โดยทำ Gauss-Jordan กับ [A | I] → [I | A⁻¹] */
+class MatrixInversionSolver extends ProblemSolver {
+    constructor(problem) {
+        super(problem, SolutionType.MATRIX_INVERSION);
+    }
+    getMethodName() {
+        return 'Matrix Inversion (Gauss-Jordan)';
+    }
+    getInverse() {
+        return this.inverse?.clone();
+    }
+    compute() {
+        const A = this.problem.getMatrixA();
+        const n = A.rows;
+        const aug = A.augment(Matrix.identity(n));
+        this.addStep('สร้าง [A | I]', undefined, aug);
+        // นำ static method ของ GaussJordanSolver มาใช้ซ้ำ (Code reuse)
+        GaussJordanSolver.rref(aug, n, (title, m) => this.addStep(title, undefined, m));
+        this.inverse = aug.sliceColumns(n, 2 * n);
+        this.addMatricesStep('ผลลัพธ์ [I | A⁻¹]', [{ label: 'A⁻¹', matrix: this.inverse }]);
+        this.addMatricesStep('ตรวจสอบ: A · A⁻¹ ควรได้ I', [{ label: 'A·A⁻¹', matrix: A.multiply(this.inverse) }]);
+        return {
+            values: this.inverse.toArray().flat(),
+            answer: 'A⁻¹ =\n' + this.inverse.toString(),
+        };
+    }
+}
+
+// ---- solvers\regression\RegressionSolver.js ----
+
+
+
+
+/**
+ * <<abstract>> RegressionSolver
+ * Least-squares regression ทุกแบบจบที่การแก้ "Normal Equations"  (XᵀX)a = Xᵀy
+ * คลาสนี้จึงสร้าง LinearSystemProblem + GaussEliminationSolver ขึ้นมาใช้งานภายใน
+ * → ตัวอย่างการนำคลาสอื่นมาประกอบใช้ (Composition / Reuse) แทนการเขียนโค้ดแก้สมการใหม่
+ */
+class RegressionSolver extends ProblemSolver {
+    constructor(problem, solutionType) {
+        super(problem, solutionType);
+        this.coefficients = [];
+    }
+    getCoefficients() {
+        return [...this.coefficients];
+    }
+    /** แก้ระบบสมการ Normal equation ด้วย Gauss Elimination */
+    solveNormalEquations(M, rhs) {
+        const subProblem = new LinearSystemProblem(JSON.stringify({ matrixA: M.toArray(), arrayB: rhs }));
+        const subSolver = new GaussEliminationSolver(subProblem);
+        const result = subSolver.solve();
+        this.addMatricesStep('Normal Equations (แก้ด้วย Gauss Elimination)', [
+            { label: 'Matrix', matrix: M },
+            { label: 'b', matrix: Matrix.columnVector(rhs) },
+        ]);
+        return result.values;
+    }
+    formatCoefficients() {
+        return this.coefficients.map((a, i) => `a${i} = ${Matrix.format(a)}`).join(',  ');
+    }
+}
+
+// ---- solvers\regression\PolynomialRegressionSolver.js ----
+// src/solvers/regression/PolynomialRegressionSolver.ts
+
+
+
+/**
+ * Polynomial Regression:  f(x) = a0 + a1x + a2x² + ... + amxᵐ
+ * implement 2 interfaces: IPredictor (ทำนายค่า) และ IGraphable (วาดกราฟได้)
+ */
+class PolynomialRegressionSolver extends RegressionSolver {
+    constructor(problem, solutionType = SolutionType.POLYNOMIAL_REGRESSION) {
+        super(problem, solutionType);
+    }
+    getMethodName() {
+        return `Polynomial Regression (m = ${this.getOrder()})`;
+    }
+    /** ดีกรีของพหุนาม — คลาสลูก (LinearRegressionSolver) override ให้เป็น 1 */
+    getOrder() {
+        return this.problem.getOrder();
+    }
+    compute() {
+        const pts = this.problem.getPoints();
+        const m = this.getOrder();
+        const n = pts.length;
+        // Σ xᵏ สำหรับ k = 0..2m และ Σ y·xᵏ สำหรับ k = 0..m
+        const sumX = Array.from({ length: 2 * m + 1 }, (_, k) => pts.reduce((s, p) => s + p.x ** k, 0));
+        const sumXY = Array.from({ length: m + 1 }, (_, k) => pts.reduce((s, p) => s + p.y * p.x ** k, 0));
+        this.addStep('คำนวณผลรวม', [`n = ${n}`,
+            ...sumX.slice(1).map((v, i) => `Σx${i + 1 > 1 ? '^' + (i + 1) : ''} = ${Matrix.format(v)}`),
+            ...sumXY.map((v, i) => `Σ${i === 0 ? '' : i === 1 ? 'x' : 'x^' + i}y = ${Matrix.format(v)}`)].join('\n'));
+        const M = Matrix.zeros(m + 1, m + 1);
+        for (let i = 0; i <= m; i++)
+            for (let j = 0; j <= m; j++)
+                M.set(i, j, sumX[i + j]);
+        this.coefficients = this.solveNormalEquations(M, sumXY);
+        this.addStep('สัมประสิทธิ์', this.formatCoefficients());
+        const eq = this.equationString();
+        const xT = this.problem.getXTarget();
+        const yT = this.predict(xT);
+        this.addStep('สมการที่ได้และค่าที่ทำนาย', `f(x) = ${eq}\nf(${xT}) = ${Matrix.format(yT)}`);
+        return { values: this.coefficients, answer: `f(x) = ${eq}\nf(${xT}) = ${Matrix.format(yT)}` };
+    }
+    predict(x) {
+        return this.coefficients.reduce((s, a, i) => s + a * x ** i, 0);
+    }
+    equationString() {
+        return this.coefficients
+            .map((a, i) => `${Matrix.format(a)}${i === 0 ? '' : i === 1 ? 'x' : `x^${i}`}`)
+            .join(' + ')
+            .replace(/\+ -/g, '− ');
+    }
+    getPlotData() {
+        const pts = this.problem.getPoints();
+        const xs = pts.map((p) => p.x);
+        const xT = this.problem.getXTarget();
+        const lo = Math.min(...xs, xT);
+        const hi = Math.max(...xs, xT);
+        const curveX = Array.from({ length: 200 }, (_, i) => lo + ((hi - lo) * i) / 199);
+        return [
+            { name: 'ข้อมูล', x: xs, y: pts.map((p) => p.y), mode: 'markers' },
+            { name: 'Regression', x: curveX, y: curveX.map((x) => this.predict(x)), mode: 'lines' },
+            { name: `f(${xT})`, x: [xT], y: [this.predict(xT)], mode: 'markers' },
+        ];
+    }
+}
+
+// ---- solvers\regression\LinearRegressionSolver.js ----
+// src/solvers/regression/LinearRegressionSolver.ts
+
+
+/**
+ * Linear Regression คือ Polynomial Regression ที่ดีกรี = 1
+ * จึง Inherit จาก PolynomialRegressionSolver แล้ว override แค่ getOrder() และชื่อวิธี
+ */
+class LinearRegressionSolver extends PolynomialRegressionSolver {
+    constructor(problem) {
+        super(problem, SolutionType.LINEAR_REGRESSION);
+    }
+    getMethodName() {
+        return 'Linear Regression  f(x) = a0 + a1x';
+    }
+    getOrder() {
+        return 1;
+    }
+}
+
+// ---- solvers\regression\MultipleLinearRegressionSolver.js ----
+// src/solvers/regression/MultipleLinearRegressionSolver.ts
+
+
+
+/**
+ * Multiple Linear Regression:  f(x1..xk) = a0 + a1x1 + ... + akxk
+ * ใช้รูปเมทริกซ์ (XᵀX)a = Xᵀy  โดย X มีคอลัมน์แรกเป็น 1
+ * (คลาสนี้ไม่ implement IGraphable เพราะข้อมูลหลายมิติวาดเป็นกราฟ 2D ไม่ได้)
+ */
+class MultipleLinearRegressionSolver extends RegressionSolver {
+    constructor(problem) {
+        super(problem, SolutionType.MULTIPLE_LINEAR_REGRESSION);
+    }
+    getMethodName() {
+        return 'Multiple Linear Regression';
+    }
+    compute() {
+        const X = new Matrix(this.problem.getXs().map((r) => [1, ...r]));
+        const y = Matrix.columnVector(this.problem.getY());
+        this.addMatricesStep('สร้างเมทริกซ์ X (คอลัมน์แรกเป็น 1) และ y', [
+            { label: 'X', matrix: X },
+            { label: 'y', matrix: y },
+        ]);
+        const Xt = X.transpose();
+        const XtX = Xt.multiply(X);
+        const Xty = Xt.multiply(y).column(0);
+        this.addMatricesStep('คำนวณ XᵀX และ Xᵀy', [
+            { label: 'XᵀX', matrix: XtX },
+            { label: 'Xᵀy', matrix: Matrix.columnVector(Xty) },
+        ]);
+        this.coefficients = this.solveNormalEquations(XtX, Xty);
+        this.addStep('สัมประสิทธิ์', this.formatCoefficients());
+        const target = this.problem.getXTarget();
+        const yT = this.predictVector(target);
+        const eq = this.coefficients
+            .map((a, i) => (i === 0 ? Matrix.format(a) : `${Matrix.format(a)}x${i}`))
+            .join(' + ')
+            .replace(/\+ -/g, '− ');
+        const args = target.map((v) => Matrix.format(v)).join(', ');
+        this.addStep('สมการที่ได้และค่าที่ทำนาย', `f = ${eq}\nf(${args}) = ${Matrix.format(yT)}`);
+        return { values: this.coefficients, answer: `f = ${eq}\nf(${args}) = ${Matrix.format(yT)}` };
+    }
+    /** Overload แนวคิด: ทำนายจากเวกเตอร์ของตัวแปรต้น */
+    predictVector(xs) {
+        return this.coefficients.reduce((s, a, i) => s + a * (i === 0 ? 1 : xs[i - 1]), 0);
+    }
+}
+
+// ---- registry.js ----
+// src/registry.ts
+// ลงทะเบียนวิธีแก้ปัญหาทั้งหมดเข้า SolverFactory
+// ถ้าต้องการเพิ่มวิธีใหม่ แค่สร้างคลาสที่ extends ProblemSolver แล้ว register ที่ไฟล์นี้ (Open/Closed Principle)
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+const LINEAR_DEFAULT = { matrixA: [[-2, 3, 1], [3, 4, -5], [1, -2, 1]], arrayB: [9, 0, -5] };
+const SPD_DEFAULT = { matrixA: [[25, 15, -5], [15, 18, 0], [-5, 0, 11]], arrayB: [35, 33, 6] };
+const REG_POINTS = [10, 15, 20, 30, 40, 50, 60, 70, 80].map((x, i) => ({ x, y: [5, 9, 15, 18, 22, 30, 35, 38, 43][i] }));
+const INT_POINTS = [0, 20000, 40000, 60000, 80000].map((x, i) => ({ x, y: [9.81, 9.7487, 9.6879, 9.6282, 9.5682][i] }));
+function registerAllSolvers() {
+    // ---------- Linear Algebra Equation ----------
+    SolverFactory.register({
+        type: SolutionType.GAUSS_ELIMINATION, label: 'Gauss Elimination', group: 'Linear Algebra Equation',
+        form: 'linear', problemClass: LinearSystemProblem, solverClass: GaussEliminationSolver,
+        description: 'กำจัดตัวแปรให้ได้เมทริกซ์สามเหลี่ยมบน แล้วแทนค่าย้อนกลับ (Back substitution)',
+        defaults: LINEAR_DEFAULT,
+    });
+    SolverFactory.register({
+        type: SolutionType.GAUSS_JORDAN, label: 'Gauss-Jordan', group: 'Linear Algebra Equation',
+        form: 'linear', problemClass: LinearSystemProblem, solverClass: GaussJordanSolver,
+        description: 'ทำ [A | b] ให้เป็น [I | x] (Reduced Row Echelon Form)',
+        defaults: LINEAR_DEFAULT,
+    });
+    SolverFactory.register({
+        type: SolutionType.LU_DECOMPOSITION, label: 'LU Decomposition', group: 'Linear Algebra Equation',
+        form: 'linear', problemClass: LinearSystemProblem, solverClass: LUDecompositionSolver,
+        description: 'แยก A = LU แล้วแก้ Ly = b และ Ux = y',
+        defaults: LINEAR_DEFAULT,
+    });
+    SolverFactory.register({
+        type: SolutionType.CHOLESKY_DECOMPOSITION, label: 'Cholesky Decomposition', group: 'Linear Algebra Equation',
+        form: 'linear', problemClass: LinearSystemProblem, solverClass: CholeskySolver,
+        description: 'แยก A = L·Lᵀ (A ต้องสมมาตรและเป็น Positive definite)',
+        defaults: SPD_DEFAULT,
+    });
+    SolverFactory.register({
+        type: SolutionType.MATRIX_INVERSION, label: 'Matrix Inversion', group: 'Linear Algebra Equation',
+        form: 'matrix', problemClass: MatrixProblem, solverClass: MatrixInversionSolver,
+        description: 'หา A⁻¹ ด้วยการทำ Gauss-Jordan กับ [A | I]',
+        defaults: { matrixA: [[4, -1, 0], [-1, 4, -1], [0, -1, 4]] },
+    });
+    // ---------- Interpolation ----------
+    SolverFactory.register({
+        type: SolutionType.NEWTON_DIVIDED_DIFFERENCE, label: "Newton's Divided-Difference", group: 'Interpolation',
+        form: 'interpolation', problemClass: InterpolationProblem, solverClass: NewtonDividedDifferenceSolver,
+        description: 'Linear (2 จุด) / Quadratic (3 จุด) / Polynomial (n จุด) ด้วยสูตรผลต่างแบ่งของนิวตัน',
+        defaults: { points: INT_POINTS, xTarget: 42235, mode: InterpolationMode.QUADRATIC, selected: [0, 2, 4] },
+    });
+    SolverFactory.register({
+        type: SolutionType.LAGRANGE_INTERPOLATION, label: 'Lagrange Interpolation', group: 'Interpolation',
+        form: 'interpolation', problemClass: InterpolationProblem, solverClass: LagrangeInterpolationSolver,
+        description: 'Linear (2 จุด) / Quadratic (3 จุด) / Polynomial (n จุด) ด้วยสูตรของลากรางจ์',
+        defaults: { points: INT_POINTS, xTarget: 42235, mode: InterpolationMode.QUADRATIC, selected: [0, 2, 4] },
+    });
+    // ---------- Regression ----------
+    SolverFactory.register({
+        type: SolutionType.LINEAR_REGRESSION, label: 'Linear Regression', group: 'Least-Squares Regression',
+        form: 'regression', problemClass: RegressionProblem, solverClass: LinearRegressionSolver,
+        description: 'หาเส้นตรง f(x) = a0 + a1x ที่ผลรวมกำลังสองของความคลาดเคลื่อนน้อยที่สุด',
+        defaults: { points: REG_POINTS, order: 1, xTarget: 65 },
+    });
+    SolverFactory.register({
+        type: SolutionType.POLYNOMIAL_REGRESSION, label: 'Polynomial Regression', group: 'Least-Squares Regression',
+        form: 'regression', problemClass: RegressionProblem, solverClass: PolynomialRegressionSolver,
+        description: 'หาพหุนามดีกรี m: f(x) = a0 + a1x + ... + amxᵐ',
+        defaults: { points: REG_POINTS, order: 2, xTarget: 65 },
+    });
+    SolverFactory.register({
+        type: SolutionType.MULTIPLE_LINEAR_REGRESSION, label: 'Multiple Linear Regression', group: 'Least-Squares Regression',
+        form: 'multiple', problemClass: MultipleRegressionProblem, solverClass: MultipleLinearRegressionSolver,
+        description: 'หลายตัวแปรต้น: f = a0 + a1x1 + a2x2 + ... + akxk',
+        defaults: {
+            xs: [[1, 0, 1], [0, 1, 3], [2, 4, 1], [3, 2, 2], [4, 1, 5], [2, 3, 3], [1, 6, 4]],
+            y: [4, -5, -6, 0, -1, -7, -20],
+            xTarget: [1, 2, 3],
+        },
+    });
+}
+
+// ---- ui\dom.js ----
+// src/ui/dom.ts
+// ฟังก์ชันช่วยสร้าง DOM element ให้โค้ด UI สั้นลง
+function h(tag, attrs = {}, children = []) {
+    const el = document.createElement(tag);
+    for (const [k, v] of Object.entries(attrs)) {
+        if (v === undefined || v === false)
+            continue;
+        if (k.startsWith('on') && typeof v === 'function')
+            el.addEventListener(k.slice(2), v);
+        else if (k === 'class')
+            el.className = String(v);
+        else if (k === 'value')
+            el.value = String(v);
+        else if (k === 'checked')
+            el.checked = Boolean(v);
+        else
+            el.setAttribute(k, v === true ? '' : String(v));
+    }
+    for (const c of children)
+        if (c !== null && c !== undefined)
+            el.append(c);
+    return el;
+}
+function numberInput(value, cls = 'cell') {
+    return h('input', { type: 'number', step: 'any', class: cls, value: Number.isFinite(value) ? String(value) : '' });
+}
+
+// ---- ui\InputForm.js ----
+// src/ui/InputForm.ts
+/**
+ * <<abstract>> InputForm
+ * ฟอร์มกรอกข้อมูลทุกแบบมีพฤติกรรมร่วมกัน: mount(), toJSON(), load()
+ * แต่ "หน้าตา" และ "วิธีอ่านค่า" ต่างกัน → render() และ readInput() เป็น abstract
+ * App เรียกใช้ผ่านชนิด InputForm เท่านั้น ไม่สนใจว่าเป็นฟอร์มแบบไหน (Polymorphism)
+ */
+class InputForm {
+    constructor(root, defaults) {
+        this.root = root;
+        this.state = structuredClone(defaults);
+    }
+    /** วาดฟอร์มใหม่ทั้งหมดจาก state ปัจจุบัน */
+    mount() {
+        this.root.innerHTML = '';
+        this.render();
+    }
+    /** โหลดข้อมูลเก่า (เช่นจากประวัติ) กลับเข้าฟอร์ม */
+    load(input) {
+        this.state = structuredClone(input);
+        this.mount();
+    }
+    /** แปลงข้อมูลในฟอร์มเป็น JSON string เพื่อส่งให้คลาส Problem */
+    toJSON() {
+        return JSON.stringify(this.readInput());
+    }
+    /** อ่านค่าตัวเลขจาก input ช่องว่าง = NaN (ให้ Problem.validate() เป็นคนแจ้ง error) */
+    static num(input) {
+        const v = input.value.trim();
+        return v === '' ? NaN : Number(v);
+    }
+    /** เก็บค่าที่ผู้ใช้พิมพ์ไว้ใน state ก่อนวาดฟอร์มใหม่ (เช่นเปลี่ยนขนาด) */
+    syncState() {
+        this.state = this.readInput();
+    }
+}
+
+// ---- ui\PointsInputForm.js ----
+
+
+/**
+ * <<abstract>> PointsInputForm
+ * ฟอร์มตารางจุด (x, y) ที่ใช้ร่วมกันระหว่าง Regression และ Interpolation
+ * คลาสลูกเติมส่วนที่ต่างกันผ่าน hook methods: renderRowExtra() และ renderOptions()
+ */
+class PointsInputForm extends InputForm {
+    constructor() {
+        super(...arguments);
+        this.xCells = [];
+        this.yCells = [];
+    }
+    resize(n) {
+        this.syncState();
+        const pts = Array.from({ length: n }, (_, i) => this.state.points[i] ?? { x: NaN, y: NaN });
+        this.state = { ...this.state, points: pts };
+        this.onResize(n);
+        this.mount();
+    }
+    /** hook: คลาสลูก override เพื่อจัดการ state ของตัวเองเมื่อจำนวนจุดเปลี่ยน */
+    onResize(_n) { }
+    /** hook: คอลัมน์เพิ่มเติมของแต่ละแถว (ค่าเริ่มต้นไม่มี) */
+    renderRowExtra(_i) {
+        return null;
+    }
+    extraHeader() {
+        return null;
+    }
+    render() {
+        const n = this.state.points.length;
+        const count = h('input', { type: 'number', min: 2, max: 30, value: n, class: 'small' });
+        count.addEventListener('change', () => this.resize(Math.min(30, Math.max(2, Number(count.value) || 2))));
+        this.xCells = this.state.points.map((p) => numberInput(p.x));
+        this.yCells = this.state.points.map((p) => numberInput(p.y));
+        const extra = this.extraHeader();
+        const rows = this.state.points.map((_, i) => h('tr', {}, [
+            h('td', { class: 'idx' }, [String(i + 1)]),
+            extra ? h('td', {}, [this.renderRowExtra(i)]) : null,
+            h('td', {}, [this.xCells[i]]),
+            h('td', {}, [this.yCells[i]]),
+        ]));
+        this.root.append(h('div', { class: 'row' }, [h('label', {}, ['จำนวนจุด ']), count]), h('table', { class: 'grid' }, [
+            h('thead', {}, [h('tr', {}, [h('th', {}, ['#']), extra ? h('th', {}, [extra]) : null, h('th', {}, ['x']), h('th', {}, ['f(x)'])])]),
+            h('tbody', {}, rows),
+        ]), this.renderOptions());
+    }
+    readPoints() {
+        return this.xCells.map((c, i) => ({ x: InputForm.num(c), y: InputForm.num(this.yCells[i]) }));
+    }
+}
+
+// ---- ui\InterpolationInputForm.js ----
+// src/ui/InterpolationInputForm.ts
+
+
+
+
+/** ฟอร์ม Interpolation: เพิ่มคอลัมน์ checkbox เลือกจุด และเลือกโหมด Linear/Quadratic/Polynomial */
+class InterpolationInputForm extends PointsInputForm {
+    constructor() {
+        super(...arguments);
+        this.checks = [];
+    }
+    /** เลือกจุดเริ่มต้นตามโหมด: Linear = หัว-ท้าย, Quadratic = หัว-กลาง-ท้าย, Polynomial = ทั้งหมด */
+    static defaultSelection(mode, n) {
+        if (mode === InterpolationMode.LINEAR)
+            return [0, n - 1];
+        if (mode === InterpolationMode.QUADRATIC)
+            return [0, Math.floor((n - 1) / 2), n - 1];
+        return Array.from({ length: n }, (_, i) => i);
+    }
+    onResize(n) {
+        this.state.selected = InterpolationInputForm.defaultSelection(this.state.mode, n);
+    }
+    extraHeader() {
+        return 'ใช้';
+    }
+    renderRowExtra(i) {
+        const c = h('input', { type: 'checkbox', checked: this.state.selected.includes(i) });
+        this.checks[i] = c;
+        return c;
+    }
+    render() {
+        this.checks = [];
+        super.render(); // เรียก render() ของคลาสแม่ แล้วเพิ่มพฤติกรรม
+    }
+    renderOptions() {
+        this.modeSelect = h('select', {}, [
+            h('option', { value: InterpolationMode.LINEAR }, ['Linear (2 จุด)']),
+            h('option', { value: InterpolationMode.QUADRATIC }, ['Quadratic (3 จุด)']),
+            h('option', { value: InterpolationMode.POLYNOMIAL }, ['Polynomial (n จุด)']),
+        ]);
+        this.modeSelect.value = this.state.mode;
+        this.modeSelect.addEventListener('change', () => {
+            this.syncState();
+            this.state.mode = this.modeSelect.value;
+            this.state.selected = InterpolationInputForm.defaultSelection(this.state.mode, this.state.points.length);
+            this.mount();
+        });
+        this.targetInput = numberInput(this.state.xTarget, 'small');
+        return h('div', { class: 'row' }, [
+            h('label', {}, ['รูปแบบ ', this.modeSelect]),
+            h('label', {}, ['ค่า x ที่ต้องการ = ', this.targetInput]),
+        ]);
+    }
+    readInput() {
+        return {
+            points: this.readPoints(),
+            xTarget: InputForm.num(this.targetInput),
+            mode: this.modeSelect?.value ?? this.state.mode,
+            selected: this.checks.map((c, i) => (c.checked ? i : -1)).filter((i) => i >= 0),
+        };
+    }
+}
+
+// ---- ui\MatrixInputForm.js ----
+// src/ui/MatrixInputForm.ts
+
+
+/** ฟอร์มกรอกเมทริกซ์ A (และเวกเตอร์ b ถ้า withB = true) */
+class MatrixInputForm extends InputForm {
+    constructor(root, defaults, withB) {
+        super(root, defaults);
+        this.cellsA = [];
+        this.cellsB = [];
+        this.withB = withB;
+    }
+    get size() {
+        return this.state.matrixA.length;
+    }
+    resize(n) {
+        this.syncState();
+        const A = Array.from({ length: n }, (_, i) => Array.from({ length: n }, (_, j) => this.state.matrixA[i]?.[j] ?? 0));
+        const b = Array.from({ length: n }, (_, i) => this.state.arrayB?.[i] ?? 0);
+        this.state = { matrixA: A, arrayB: b };
+        this.mount();
+    }
+    render() {
+        const n = this.size;
+        const sizeSelect = h('select', { onchange: (e) => this.resize(Number(e.target.value)) }, [2, 3, 4, 5, 6, 7, 8].map((k) => h('option', { value: k, selected: k === n }, [`${k} × ${k}`])));
+        sizeSelect.value = String(n);
+        this.cellsA = this.state.matrixA.map((r) => r.map((v) => numberInput(v)));
+        this.cellsB = Array.from({ length: n }, (_, i) => numberInput(this.state.arrayB?.[i]));
+        const header = h('tr', {}, [
+            ...Array.from({ length: n }, (_, j) => h('th', {}, [`x${j + 1}`])),
+            this.withB ? h('th', { class: 'sep' }, ['b']) : null,
+        ]);
+        const rows = this.cellsA.map((r, i) => h('tr', {}, [...r.map((c) => h('td', {}, [c])), this.withB ? h('td', { class: 'sep' }, [this.cellsB[i]]) : null]));
+        this.root.append(h('div', { class: 'row' }, [h('label', {}, ['ขนาดเมทริกซ์ ']), sizeSelect]), h('table', { class: 'grid' }, [h('thead', {}, [header]), h('tbody', {}, rows)]));
+    }
+    readInput() {
+        const matrixA = this.cellsA.map((r) => r.map((c) => InputForm.num(c)));
+        return this.withB ? { matrixA, arrayB: this.cellsB.map((c) => InputForm.num(c)) } : { matrixA };
+    }
+}
+
+// ---- ui\MultipleRegressionInputForm.js ----
+
+
+/** ฟอร์ม Multiple Linear Regression: ตาราง x1..xk, y และค่าที่ต้องการทำนาย */
+class MultipleRegressionInputForm extends InputForm {
+    constructor() {
+        super(...arguments);
+        this.xCells = [];
+        this.yCells = [];
+        this.targetCells = [];
+    }
+    reshape(n, k) {
+        this.syncState();
+        const s = this.state;
+        this.state = {
+            xs: Array.from({ length: n }, (_, i) => Array.from({ length: k }, (_, j) => s.xs[i]?.[j] ?? NaN)),
+            y: Array.from({ length: n }, (_, i) => s.y[i] ?? NaN),
+            xTarget: Array.from({ length: k }, (_, j) => s.xTarget[j] ?? NaN),
+        };
+        this.mount();
+    }
+    render() {
+        const n = this.state.xs.length;
+        const k = this.state.xs[0]?.length ?? 1;
+        const nInput = h('input', { type: 'number', min: 2, max: 30, value: n, class: 'small' });
+        const kInput = h('input', { type: 'number', min: 1, max: 6, value: k, class: 'small' });
+        const apply = () => this.reshape(Math.max(2, Number(nInput.value) || 2), Math.min(6, Math.max(1, Number(kInput.value) || 1)));
+        nInput.addEventListener('change', apply);
+        kInput.addEventListener('change', apply);
+        this.xCells = this.state.xs.map((r) => r.map((v) => numberInput(v)));
+        this.yCells = this.state.y.map((v) => numberInput(v));
+        this.targetCells = this.state.xTarget.map((v) => numberInput(v));
+        const head = h('tr', {}, [h('th', {}, ['#']), ...Array.from({ length: k }, (_, j) => h('th', {}, [`x${j + 1}`])), h('th', { class: 'sep' }, ['y'])]);
+        const rows = this.xCells.map((r, i) => h('tr', {}, [h('td', { class: 'idx' }, [String(i + 1)]), ...r.map((c) => h('td', {}, [c])), h('td', { class: 'sep' }, [this.yCells[i]])]));
+        this.root.append(h('div', { class: 'row' }, [h('label', {}, ['จำนวนข้อมูล ', nInput]), h('label', {}, ['จำนวนตัวแปร x ', kInput])]), h('table', { class: 'grid' }, [h('thead', {}, [head]), h('tbody', {}, rows)]), h('div', { class: 'row' }, [
+            h('span', {}, ['ค่าที่ต้องการทำนาย: ']),
+            ...this.targetCells.map((c, j) => h('label', {}, [`x${j + 1} = `, c])),
+        ]));
+    }
+    readInput() {
+        return {
+            xs: this.xCells.map((r) => r.map((c) => InputForm.num(c))),
+            y: this.yCells.map((c) => InputForm.num(c)),
+            xTarget: this.targetCells.map((c) => InputForm.num(c)),
+        };
+    }
+}
+
+// ---- ui\RegressionInputForm.js ----
+
+
+
+/** ฟอร์ม Linear / Polynomial Regression */
+class RegressionInputForm extends PointsInputForm {
+    constructor(root, defaults, fixedOrder) {
+        super(root, defaults);
+        this.fixedOrder = fixedOrder;
+    }
+    renderOptions() {
+        this.orderInput = h('input', { type: 'number', min: 1, max: 10, value: this.state.order, class: 'small' });
+        this.targetInput = numberInput(this.state.xTarget, 'small');
+        return h('div', { class: 'row' }, [
+            this.fixedOrder ? null : h('label', {}, ['ดีกรี m = ', this.orderInput]),
+            h('label', {}, ['ค่า x ที่ต้องการทำนาย = ', this.targetInput]),
+        ]);
+    }
+    readInput() {
+        return {
+            points: this.readPoints(),
+            order: this.fixedOrder ? 1 : InputForm.num(this.orderInput),
+            xTarget: InputForm.num(this.targetInput),
+        };
+    }
+}
+
+// ---- ui\FormFactory.js ----
+// src/ui/FormFactory.ts
+
+
+
+
+
+/** Factory สร้างฟอร์มที่เหมาะกับวิธีแก้ปัญหา คืนค่าเป็นชนิดคลาสแม่ InputForm */
+class FormFactory {
+    static create(d, root, input) {
+        const data = (input ?? d.defaults);
+        switch (d.form) {
+            case 'linear':
+                return new MatrixInputForm(root, data, true);
+            case 'matrix':
+                return new MatrixInputForm(root, data, false);
+            case 'regression':
+                return new RegressionInputForm(root, data, d.type === SolutionType.LINEAR_REGRESSION);
+            case 'interpolation':
+                return new InterpolationInputForm(root, data);
+            case 'multiple':
+                return new MultipleRegressionInputForm(root, data);
+        }
+    }
+}
+
+// ---- ui\HistoryRepository.js ----
+/**
+ * Repository สำหรับเก็บประวัติการคำนวณ (แทนฐานข้อมูลในต้นแบบ ใช้ localStorage ของเบราว์เซอร์)
+ * Encapsulation: ผู้ใช้คลาสไม่รู้ว่าเก็บข้อมูลไว้ที่ไหน รู้แค่ add() / all() / clear()
+ */
+class HistoryRepository {
+    constructor() {
+        this.records = this.load();
+    }
+    load() {
+        try {
+            return JSON.parse(localStorage.getItem(HistoryRepository.KEY) ?? '[]');
+        }
+        catch {
+            return [];
+        }
+    }
+    persist() {
+        try {
+            localStorage.setItem(HistoryRepository.KEY, JSON.stringify(this.records));
+        }
+        catch {
+            /* เบราว์เซอร์บางแบบไม่อนุญาต localStorage — เก็บในหน่วยความจำอย่างเดียว */
+        }
+    }
+    add(record) {
+        const full = { ...record, id: Math.random().toString(36).slice(2, 8), date: new Date().toLocaleString('th-TH') };
+        this.records = [full, ...this.records].slice(0, HistoryRepository.LIMIT);
+        this.persist();
+    }
+    all() {
+        return [...this.records];
+    }
+    find(id) {
+        return this.records.find((r) => r.id === id);
+    }
+    clear() {
+        this.records = [];
+        this.persist();
+    }
+}
+HistoryRepository.KEY = 'numer-oop-history';
+HistoryRepository.LIMIT = 30;
+
+// ---- core\interfaces.js ----
+/** Type guard: ตรวจว่า object นั้น implement IGraphable หรือไม่ */
+function isGraphable(obj) {
+    return typeof obj?.getPlotData === 'function';
+}
+
+// ---- ui\ResultView.js ----
+// src/ui/ResultView.ts
+
+
+
+/** แสดงผลลัพธ์ ขั้นตอน และกราฟ */
+class ResultView {
+    constructor(root) {
+        this.root = root;
+    }
+    clear() {
+        this.root.innerHTML = '';
+    }
+    showError(message) {
+        this.root.innerHTML = '';
+        this.root.append(h('div', { class: 'error' }, [message]));
+    }
+    show(solver, result) {
+        this.root.innerHTML = '';
+        this.root.append(h('h3', {}, ['คำตอบ']), h('pre', { class: 'answer' }, [result.answer]), h('p', { class: 'muted' }, [`วิธี: ${solver.getMethodName()} · ใช้เวลา ${result.elapsedMs.toFixed(3)} ms`]));
+        // ใช้ type guard ตรวจว่า solver ตัวนี้ implement IGraphable หรือไม่
+        if (isGraphable(solver) && typeof Plotly !== 'undefined') {
+            const div = h('div', { class: 'graph' });
+            this.root.append(h('h3', {}, ['กราฟ']), div);
+            const traces = solver.getPlotData().map((s) => ({ ...s, type: 'scatter', marker: { size: s.mode === 'markers' ? 8 : 4 } }));
+            Plotly.newPlot(div, traces, { margin: { t: 20, r: 20, b: 40, l: 50 }, legend: { orientation: 'h' } }, { responsive: true });
+        }
+        this.root.append(h('h3', {}, ['วิธีทำ']));
+        result.steps.forEach((s, i) => this.root.append(this.renderStep(s, i + 1)));
+    }
+    renderStep(step, no) {
+        const box = h('div', { class: 'step' }, [h('div', { class: 'step-title' }, [`${no}. ${step.title}`])]);
+        if (step.text)
+            box.append(h('pre', {}, [step.text]));
+        if (step.matrix)
+            box.append(ResultView.matrixTable(step.matrix));
+        if (step.matrices) {
+            box.append(h('div', { class: 'mats' }, step.matrices.map((m) => h('div', {}, [h('div', { class: 'muted' }, [m.label]), ResultView.matrixTable(m.matrix)]))));
+        }
+        return box;
+    }
+    static matrixTable(m) {
+        return h('table', { class: 'matrix' }, [
+            h('tbody', {}, m.toArray().map((r) => h('tr', {}, r.map((v) => h('td', {}, [Matrix.format(v)]))))),
+        ]);
+    }
+}
+
+// ---- ui\App.js ----
+
+
+
+
+
+
+/** คลาสหลักของหน้าเว็บ: จัดการเมนู ฟอร์ม ปุ่มคำนวณ ผลลัพธ์ และประวัติ */
+class App {
+    constructor(root) {
+        this.history = new HistoryRepository();
+        this.nav = h('nav');
+        this.main = h('main');
+        root.append(this.nav, this.main);
+    }
+    start() {
+        this.renderNav();
+        const first = SolverFactory.list()[0];
+        this.select(first.type);
+    }
+    renderNav() {
+        this.nav.innerHTML = '';
+        this.nav.append(h('h1', {}, ['Numerical Methods']));
+        const groups = new Map();
+        for (const d of SolverFactory.list())
+            groups.set(d.group, [...(groups.get(d.group) ?? []), d]);
+        for (const [group, items] of groups) {
+            this.nav.append(h('div', { class: 'group' }, [group]));
+            for (const d of items)
+                this.nav.append(h('a', {
+                    href: '#', 'data-type': d.type, class: d.type === this.current?.type ? 'active' : '',
+                    onclick: (e) => { e.preventDefault(); this.select(d.type); },
+                }, [d.label]));
+        }
+    }
+    select(type, input) {
+        this.current = SolverFactory.get(type);
+        this.renderNav();
+        this.main.innerHTML = '';
+        const formRoot = h('div', { class: 'form' });
+        const resultRoot = h('div', { class: 'result' });
+        const resultView = new ResultView(resultRoot);
+        this.form = FormFactory.create(this.current, formRoot, input);
+        this.form.mount();
+        this.main.append(h('h2', {}, [this.current.label]), h('p', { class: 'muted' }, [this.current.description]), formRoot, h('div', { class: 'row' }, [
+            h('button', { class: 'primary', onclick: () => this.calculate(resultView) }, ['คำนวณ']),
+            h('button', { onclick: () => { this.form.load(this.current.defaults); resultView.clear(); } }, ['ใช้ค่าตัวอย่าง']),
+        ]), resultRoot, this.renderHistory());
+    }
+    calculate(view) {
+        try {
+            const input = this.form.toJSON();
+            // Polymorphism: ได้ ProblemSolver กลับมา ไม่ว่าจะเป็นวิธีไหนก็เรียก solve() เหมือนกัน
+            const solver = SolverFactory.create(this.current.type, input);
+            const result = solver.solve();
+            view.show(solver, result);
+            this.history.add({ solutionType: this.current.type, label: this.current.label, input, answer: result.answer.replace(/\n/g, ' ; ').slice(0, 90) });
+            this.main.querySelector('.history')?.replaceWith(this.renderHistory());
+        }
+        catch (err) {
+            const msg = err instanceof NumericalError ? err.message : `เกิดข้อผิดพลาด: ${err.message}`;
+            view.showError(msg);
+        }
+    }
+    renderHistory() {
+        const records = this.history.all();
+        const box = h('div', { class: 'history' }, [h('h3', {}, ['ประวัติการคำนวณ'])]);
+        if (!records.length) {
+            box.append(h('p', { class: 'muted' }, ['ยังไม่มีประวัติ']));
+            return box;
+        }
+        box.append(h('table', { class: 'list' }, [
+            h('thead', {}, [h('tr', {}, ['วันที่', 'วิธี', 'คำตอบ', ''].map((t) => h('th', {}, [t])))]),
+            h('tbody', {}, records.map((r) => h('tr', {}, [
+                h('td', {}, [r.date]),
+                h('td', {}, [r.label]),
+                h('td', { class: 'mono' }, [r.answer]),
+                h('td', {}, [h('button', { onclick: () => this.select(r.solutionType, JSON.parse(r.input)) }, ['เปิด'])]),
+            ]))),
+        ]), h('button', { onclick: () => { this.history.clear(); box.replaceWith(this.renderHistory()); } }, ['ล้างประวัติ']));
+        return box;
+    }
+}
+
+// ---- main.js ----
+// src/main.ts — จุดเริ่มต้นของโปรแกรม
+
+
+registerAllSolvers();
+new App(document.getElementById('app')).start();
+
+})();
+</script>
+</body>
+</html>

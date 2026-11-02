@@ -1,0 +1,14 @@
+{
+    "name": "numer-oop-web",
+    "version": "1.0.0",
+    "description": "Numerical Method Calculator Website (OOP / TypeScript)",
+    "type": "module",
+    "scripts": {
+        "build": "tsc -p . && node scripts/bundle.mjs",
+        "watch": "tsc -p . --watch",
+        "start": "npx --yes serve ."
+    },
+    "devDependencies": {
+        "typescript": "^5.6.0"
+    }
+}
